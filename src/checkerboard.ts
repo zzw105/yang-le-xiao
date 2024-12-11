@@ -9,8 +9,11 @@ type directionType = "up" | "left" | "down" | "right";
 
 const Checkerboard = class {
   data: number[][] = Array.from({ length: 14 }, () => []);
+
   movingData: number[][] = Array.from({ length: 14 }, () => []);
-  movingCheckerboard: typeof Checkerboard | null = null;
+
+  movingCheckerboard: InstanceType<typeof Checkerboard> | null = null;
+
   constructor(imgArr?: string[][], data?: number[][]) {
     imgArr &&
       imgArr.forEach((item, index) => {
@@ -19,7 +22,7 @@ const Checkerboard = class {
           this.data[+x][+y] = index + 1;
         });
       });
-    data && (this.data = data);
+    data && (this.data = structuredClone(data));
   }
 
   findCross(item: itemInfo) {
@@ -52,184 +55,146 @@ const Checkerboard = class {
     return { leftItem, rightItem, upItem, downItem };
   }
 
-  cleanCrossRecently(
-    item: itemInfo,
-    directionType: directionType[] = ["up", "left", "down", "right"],
-    isClean = true
-  ) {
-    const { leftItem, rightItem, upItem, downItem } =
-      this.findCrossRecently(item);
+  cleanCrossRecently(item: itemInfo, directionType: directionType[] = ["up", "left", "down", "right"], isClean = true) {
+    const { leftItem, rightItem, upItem, downItem } = this.findCrossRecently(item);
     const directionCleanItemArr = directionType.map((type) => {
       if (type === "right") return rightItem;
       else if (type === "left") return leftItem;
       else if (type === "up") return upItem;
       else if (type === "down") return downItem;
     });
-    const cleanItem = this.findItemListSame(
-      this.getItemName(item),
-      directionCleanItemArr
-    );
+    const cleanItem = this.findItemListSame(this.getItemName(item), directionCleanItemArr);
     if (cleanItem) {
-      if (isClean) this.setZero(cleanItem);
+      if (isClean) {
+        this.setZero(cleanItem);
+        this.setZero(item);
+        this.logData();
+      }
       return cleanItem;
     }
   }
 
-  moveData(
-    data: number[][],
-    item: itemInfo,
-    direction: directionType,
-    num: number
-  ) {
+  crossMoveClean(item: itemInfo, directionType: directionType, canMove = true, last = false): itemInfo | undefined {
     const { leftList, rightList, upList, downList } = this.findCross(item);
-    // 右
-    let isMobileCompleted = false;
-    const moveList: number[] = [];
-    const rightListName = rightList.map((item) => this.getItemName(item, data));
-    rightListName.forEach((itemName) => {
-      if (isMobileCompleted) {
-        moveList.push(itemName);
-      } else {
-        if (itemName !== 0) {
-          moveList.push(itemName);
-        }
-        if (itemName === 0) {
-          isMobileCompleted = true;
-        }
-      }
-    });
-    moveList.unshift(data[item.rowIndex][item.colIndex]);
-    data[item.rowIndex][item.colIndex] = 0;
-    moveList.forEach((moveListItem, index) => {
-      data[item.rowIndex][item.colIndex + index + 1] = moveListItem;
-    });
+    let crossList: itemInfo[] = [];
+    if (directionType === "down") crossList = downList;
+    else if (directionType === "left") crossList = leftList;
+    else if (directionType === "right") crossList = rightList;
+    else if (directionType === "up") crossList = upList;
+    const itemName = this.getItemName(item);
+    // 右边
+    const crossListName = crossList.map((item) => this.getItemName(item));
 
-    this.logData(data);
+    const crossIndex = crossListName.findIndex((item) => item === 0);
+
+    if (crossIndex === -1) {
+      canMove = false;
+    } else if (crossListName[crossIndex + 1] !== 0) {
+      last = true;
+    }
+
+    if (canMove) {
+      crossListName.splice(crossIndex, 1);
+      crossListName.unshift(itemName);
+      this.data[item.rowIndex][item.colIndex] = 0;
+      crossListName.forEach((crossListItem, index) => {
+        if (directionType === "down") this.data[item.rowIndex + index + 1][item.colIndex] = crossListItem;
+        else if (directionType === "left") this.data[item.rowIndex][item.colIndex - index - 1] = crossListItem;
+        else if (directionType === "right") this.data[item.rowIndex][item.colIndex + index + 1] = crossListItem;
+        else if (directionType === "up") this.data[item.rowIndex - index - 1][item.colIndex] = crossListItem;
+      });
+
+      let newItem: itemInfo;
+      let directionTypeList: directionType[];
+
+      if (directionType === "down") {
+        newItem = { rowIndex: item.rowIndex + 1, colIndex: item.colIndex };
+        directionTypeList = ["left", "right"];
+      } else if (directionType === "left") {
+        newItem = { rowIndex: item.rowIndex, colIndex: item.colIndex - 1 };
+        directionTypeList = ["up", "down"];
+      } else if (directionType === "right") {
+        newItem = { rowIndex: item.rowIndex, colIndex: item.colIndex + 1 };
+        directionTypeList = ["up", "down"];
+      } else {
+        newItem = { rowIndex: item.rowIndex - 1, colIndex: item.colIndex };
+        directionTypeList = ["left", "right"];
+      }
+
+      const res = this.cleanCrossRecently(newItem, directionTypeList);
+      if (res) {
+        return res;
+      }
+
+      if (last) {
+        canMove = false;
+      }
+
+      return this.crossMoveClean(newItem, directionType, canMove, last);
+    }
   }
 
-  cleanCrossMove(item: itemInfo) {
-    const { leftList, rightList, upList, downList } = this.findCross(item);
-    let leftMoveNum = 0;
-    let rightMoveNum = 0;
-    let upMoveNum = 0;
-    let downMoveNum = 0;
+  checkMoveClean(item: itemInfo, directionType: directionType) {
+    this.movingCheckerboard = new Checkerboard(undefined, this.data);
+    const res = this.movingCheckerboard.crossMoveClean(item, directionType);
+    if (res) {
+      console.log({ directionType });
 
-    [leftList, rightList, upList, downList].forEach((list, type) => {
-      let countState = 0;
-      list.forEach((listItem) => {
-        const listItemName = this.getItemName(listItem);
-        if (countState === 0) {
-          if (listItemName === 0) {
-            countState++;
-          }
-        } else if (countState > 0) {
-          if (listItemName === 0) {
-            countState++;
-          } else {
-            if (type === 0) leftMoveNum = countState;
-            else if (type === 1) rightMoveNum = countState;
-            else if (type === 2) upMoveNum = countState;
-            else if (type === 3) downMoveNum = countState;
-            countState = -1;
-          }
-        }
-      });
-    });
-    console.log(rightMoveNum);
-
-    this.movingData = structuredClone(this.data);
-    // this.moveData(this.movingData, item, "left", leftMoveNum);
-    this.moveData(this.movingData, item, "right", rightMoveNum);
-    // this.moveData(this.movingData, item, "up", upMoveNum);
-    // this.moveData(this.movingData, item, "down", downMoveNum);
-
-    // const leftMove: itemInfo[] = [];
-    // const rightMove: itemInfo[] = [];
-    // const upMove: itemInfo[] = [];
-    // const downMove: itemInfo[] = [];
-
-    // function setMoveItem(item: itemInfo, type: number, num: number) {
-    //   if (type === 0) {
-    //     leftMove.push({
-    //       rowIndex: item.rowIndex,
-    //       colIndex: item.colIndex - num,
-    //     });
-    //   } else if (type === 1) {
-    //     rightMove.push({
-    //       rowIndex: item.rowIndex,
-    //       colIndex: item.colIndex + num,
-    //     });
-    //   } else if (type === 2) {
-    //     upMove.push({
-    //       rowIndex: item.rowIndex - num,
-    //       colIndex: item.colIndex,
-    //     });
-    //   } else if (type === 3) {
-    //     downMove.push({
-    //       rowIndex: item.rowIndex + num,
-    //       colIndex: item.colIndex,
-    //     });
-    //   }
-    // }
-
-    // [leftList, rightList, upList, downList].forEach((list, type) => {
-    //   let countState = 0;
-    //   list.forEach((listItem) => {
-    //     const listItemName = this.getItemName(listItem);
-    //     if (countState === 0) {
-    //       if (listItemName === 0) {
-    //         countState++;
-    //         setMoveItem(item, type, countState);
-    //       }
-    //     } else if (countState > 0) {
-    //       if (listItemName === 0) {
-    //         countState++;
-    //         setMoveItem(item, type, countState);
-    //       } else {
-    //         countState = -1;
-    //       }
-    //     }
-    //   });
-    // });
-    // console.log({ leftMove, rightMove, upMove, downMove });
-    // leftMove.forEach((moveItem) => {
-    //  const res =  this.cleanCrossRecently(moveItem, ["up",  "down",]);
-    // });
-    // leftList.forEach((leftListItem) => {
-    //   const leftListItemName = this.getItemName(leftListItem);
-    //   if (countState === 0) {
-    //     if (leftListItemName === 0) {
-    //       countState = 1;
-    //       leftRightMove.push(leftListItem);
-    //     }
-    //   } else if (countState === 1) {
-    //     if (leftListItemName === 0) {
-    //       leftRightMove.push(leftListItem);
-    //     } else {
-    //       countState = 2;
-    //     }
-    //   }
-    // });
+      this.data = this.movingCheckerboard.data;
+      return res;
+    } else {
+      this.movingCheckerboard = null;
+    }
   }
 
   clearDirectly(data = this.data) {
     this.logData();
     let isClear = false;
+    // const rowNum = [0, 13, 1, 12, 2, 11, 3, 10, 4, 9, 5, 8, 6, 7];
+    const rowNum = [0, 13, 1, 12, 2, 11, 3, 10, 4, 9, 5, 8, 6, 7].reverse();
+
+    // const colNum = [0, 9, 1, 8, 2, 7, 3, 6, 4, 5];
+    const colNum = [0, 9, 1, 8, 2, 7, 3, 6, 4, 5].reverse();
+
     do {
       isClear = false; // 每轮开始时重置为 false
-      this.data.forEach((row, rowIndex) => {
-        row.forEach((_, colIndex) => {
+      for (let i = 0; i < rowNum.length; i++) {
+        const rowIndex = rowNum[i];
+        for (let j = 0; j < colNum.length; j++) {
+          const colIndex = colNum[j];
           const item = { rowIndex, colIndex };
           const itemName = this.getItemName(item, data);
-          if (itemName === 0) return;
-          const res = this.cleanCrossRecently(item);
-          if (res) {
-            this.setZero(item);
-            isClear = true; // 如果发生清理，标记为 true
+          if (itemName !== 0) {
+            const functions = [
+              () => {
+                return this.cleanCrossRecently(item);
+              },
+              () => {
+                return this.checkMoveClean(item, "left");
+              },
+              () => {
+                return this.checkMoveClean(item, "right");
+              },
+              () => {
+                return this.checkMoveClean(item, "up");
+              },
+              () => {
+                return this.checkMoveClean(item, "down");
+              },
+            ];
+            for (const func of functions) {
+              if (func()) {
+                isClear = true;
+
+                break;
+              }
+            }
           }
-        });
-      });
-      this.logData();
+
+          if (isClear) break;
+        }
+        if (isClear) break;
+      }
     } while (isClear); // 继续循环，直到没有清理操作
   }
 
@@ -255,9 +220,7 @@ const Checkerboard = class {
   logData(data: number[][] = this.data) {
     data.forEach((item) => {
       item.forEach((info) => {
-        process.stdout.write(
-          `${chalk.bgHex(fontColor[info])(info.toString().padStart(2, "0"))} `
-        );
+        process.stdout.write(`${chalk.bgHex(fontColor[info])(info.toString().padStart(2, "0"))} `);
       });
       process.stdout.write("\n");
     });
